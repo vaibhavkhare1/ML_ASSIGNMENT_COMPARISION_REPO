@@ -1,3 +1,4 @@
+
 #Import Libraries
 import os;
 import sklearn
@@ -56,7 +57,7 @@ st.markdown(
         color: {'white' if selected_color_name in ['Black', 'Navy Blue', 'Red', 'Green'] else 'black'};
     }}
     .stButton {{ /* Adjust button text color */
-        color: {'white' if selected_color_name in ['Black', 'Navy Blue', 'Red', 'Green'] else 'black'}; 
+        color: {'white' if selected_color_name in ['Black', 'Navy Blue', 'Red', 'Green'] else 'black'};
     }}
     /* CSS for left-aligning content in st.dataframe tables */
     div[data-testid="stDataFrame"] table th,
