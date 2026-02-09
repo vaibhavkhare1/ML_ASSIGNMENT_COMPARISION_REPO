@@ -1,5 +1,3 @@
-
-#Import Libraries
 import os;
 import sklearn
 import matplotlib.pyplot as plt
@@ -7,6 +5,7 @@ import seaborn as sns
 import streamlit as st
 import pandas as pd
 import numpy as np
+import requests # Import the requests library
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import OneHotEncoder
 from sklearn.linear_model import LogisticRegression
@@ -14,6 +13,7 @@ from sklearn.tree import DecisionTreeClassifier
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.naive_bayes import GaussianNB
 from sklearn.ensemble import RandomForestClassifier
+from sklearn.datasets import make_classification
 import xgboost as xgb
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, classification_report, confusion_matrix, roc_auc_score, matthews_corrcoef
 
@@ -23,51 +23,12 @@ st.set_page_config(
     layout='wide'
 )
 
-# Color options for the background
+
+# Set 'Light Gray' as the default selected color
 color_options = {
-    'Light Gray': 'lightgray',
-    'Light Cyan': 'lightcyan',
-    'Sky Blue': 'skyblue',
-    'Light Green': 'lightgreen',
-    'Light Coral': 'lightcoral',
-    'White': 'white',
-    'Black': 'black',
-    'Red': 'red',
-    'Green': 'green',
-    'Navy Blue': 'navy'
+    'Light Gray': '#D3D3D3',
+    'Black': '#000000'
 }
-
-# Add color selection to sidebar
-st.sidebar.header('Color Scheme Selection')
-selected_color_name = st.sidebar.selectbox('Choose Background Color', list(color_options.keys()))
-selected_color_hex = color_options[selected_color_name]
-
-# --- Custom CSS for background color and text color ---
-st.markdown(
-    f"""
-    <style>
-    .stApp {{ /* Target the main Streamlit application container */
-        background-color: {selected_color_hex};
-        color: {'white' if selected_color_name in ['Black', 'Navy Blue', 'Red', 'Green'] else 'black'}; /* Adjust text color for dark backgrounds */
-    }}
-    .stMarkdown {{ /* Adjust markdown text color if necessary */
-        color: {'white' if selected_color_name in ['Black', 'Navy Blue', 'Red', 'Green'] else 'black'};
-    }}
-    h1, h2, h3, h4, h5, h6 {{ /* Adjust header text color */
-        color: {'white' if selected_color_name in ['Black', 'Navy Blue', 'Red', 'Green'] else 'black'};
-    }}
-    .stButton {{ /* Adjust button text color */
-        color: {'white' if selected_color_name in ['Black', 'Navy Blue', 'Red', 'Green'] else 'black'};
-    }}
-    /* CSS for left-aligning content in st.dataframe tables */
-    div[data-testid="stDataFrame"] table th,
-    div[data-testid="stDataFrame"] table td {{
-        text-align: left !important;
-    }}
-    </style>
-    """,
-    unsafe_allow_html=True
-)
 
 # 2. Set the main title of the Streamlit application
 st.title('Direct Marketing Campaigns on Portuguese Banking Data')
@@ -98,6 +59,26 @@ if 'original_df' not in st.session_state: # Initialize original_df
 # --- Data Upload ---
 st.header('Data Upload - Upload Your Test Data')
 uploaded_file = st.file_uploader("Upload your CSV file", type=["csv"])
+
+# --- Download Sample Data ---
+st.subheader("Or download a sample test file:")
+sample_data_url = "https://raw.githubusercontent.com/vaibhavkhare1/ML_ASSIGNMENT_COMPARISION_REPO/main/bank-test.csv"
+
+try:
+    response = requests.get(sample_data_url)
+    if response.status_code == 200:
+        st.download_button(
+            label="Download Sample 'bank-test.csv'",
+            data=response.content,
+            file_name="bank-test.csv",
+            mime="text/csv"
+        )
+    else:
+        st.error(f"Failed to fetch sample data from URL. Status code: {response.status_code}")
+except requests.exceptions.RequestException as e:
+    st.error(f"Error fetching sample data: {e}")
+
+
 
 if uploaded_file is not None:
     try:
@@ -137,6 +118,53 @@ if st.session_state['original_df'] is not None:
     else:
         df_processed = df.copy()
         st.info("No categorical columns found for one-hot encoding.")
+
+    # --- Add Missing Value Handling ---
+    st.subheader("Handling Missing Values")
+
+    # Identify columns with NaN values
+    missing_cols_nan = df_processed.columns[df_processed.isnull().any()].tolist()
+
+    # Identify columns with infinite values (only check numerical columns)
+    numerical_cols_in_processed_df = df_processed.select_dtypes(include=np.number).columns
+    missing_cols_inf = [col for col in numerical_cols_in_processed_df if np.isinf(df_processed[col]).any()]
+
+    if missing_cols_nan or missing_cols_inf:
+        st.warning("Found missing or infinite values. Handling them...")
+
+        # Handle NaN values
+        if missing_cols_nan:
+            st.write(f"Imputing NaN values in columns: {', '.join(missing_cols_nan)} with mean/mode.")
+            for col in missing_cols_nan:
+                if df_processed[col].dtype in ['int64', 'float64']:
+                    # Calculate mean, if mean is NaN (meaning all values are NaN), use 0 as fallback
+                    imputation_value = df_processed[col].mean()
+                    if pd.isna(imputation_value):
+                        imputation_value = 0 # Fallback for entirely NaN numerical columns
+                    df_processed[col].fillna(imputation_value, inplace=True)
+                else:
+                    # For non-numeric NaNs, use mode. Handle case where mode might be empty (e.g., all NaN)
+                    if not df_processed[col].mode().empty:
+                        df_processed[col].fillna(df_processed[col].mode()[0], inplace=True)
+                    else:
+                        df_processed[col].fillna('unknown', inplace=True) # Fallback for entirely NaN object columns
+
+        # Handle infinite values
+        if missing_cols_inf:
+            st.write(f"Replacing infinite values in columns: {', '.join(missing_cols_inf)} with NaN, then re-imputing with mean.")
+            for col in missing_cols_inf:
+                # Replace inf with NaN first
+                df_processed[col].replace([np.inf, -np.inf], np.nan, inplace=True)
+                # Re-impute if it was originally inf, now NaN. Use 0 as fallback if mean is NaN.
+                if df_processed[col].isnull().any():
+                     imputation_value = df_processed[col].mean()
+                     if pd.isna(imputation_value):
+                         imputation_value = 0 # Fallback for entirely NaN numerical columns after inf replacement
+                     df_processed[col].fillna(imputation_value, inplace=True)
+
+        st.success("Missing and infinite values handled.")
+    else:
+        st.info("No missing or infinite values found.")
 
     st.subheader("Preprocessed Data Preview:")
     st.dataframe(df_processed.head())
@@ -207,7 +235,8 @@ if st.session_state['X_train'] is not None and st.session_state['y_train'] is no
             elif st.session_state['selected_model'] == 'Naive Bayes Classifier (Gaussian Model)':
                 model = GaussianNB()
             elif st.session_state['selected_model'] == 'Random Forest Model':
-                model = RandomForestClassifier(random_state=42)
+                model = RandomForestClassifier(n_estimators=10, random_state=42)
+                model.fit(X_train, y_train)
             elif st.session_state['selected_model'] == 'XGBoost Model':
                 model = xgb.XGBClassifier(random_state=42, use_label_encoder=False, eval_metric='logloss', objective='binary:logistic')
 
@@ -216,6 +245,14 @@ if st.session_state['X_train'] is not None and st.session_state['y_train'] is no
                 st.success(f"{st.session_state['selected_model']} trained successfully!")
                 st.session_state['model'] = model
                 st.session_state['y_pred'] = model.predict(X_test)
+
+                # Modified block to handle AttributeError robustly
+                if st.session_state['selected_model'] == 'Random Forest Model':
+                    try:
+                        num_estimators = len(model.estimators_)
+                        st.info(f"Number of estimators (trees) in the Random Forest model: {num_estimators}")
+                    except AttributeError:
+                        st.warning("Could not access 'estimators_' attribute for Random Forest model after training. Ensure the model fitted successfully.")
             else:
                 st.error("No model selected or initialized.")
         except Exception as e:
@@ -244,12 +281,22 @@ if st.session_state['model'] is not None and st.session_state['y_test'] is not N
         precision = precision_score(y_test, y_pred, zero_division=0)
         recall = recall_score(y_test, y_pred, zero_division=0)
         f1 = f1_score(y_test, y_pred, zero_division=0)
-        auc_score = roc_auc_score(y_test, st.session_state['model'].predict_proba(st.session_state['X_test'])[:, 1])
+        # Ensure predict_proba is available and model is fitted for AUC score
+        if hasattr(st.session_state['model'], 'predict_proba'):
+            try:
+                auc_score = roc_auc_score(y_test, st.session_state['model'].predict_proba(st.session_state['X_test'])[:, 1])
+            except Exception as e:
+                st.warning(f"Could not calculate AUC score: {e}. Some models may not support predict_proba or require specific data types.")
+                auc_score = 'N/A'
+        else:
+            st.warning("Selected model does not have a 'predict_proba' method for AUC calculation.")
+            auc_score = 'N/A'
+
         mcc = matthews_corrcoef(y_test, y_pred)
 
         # Display metrics in a table
         metrics_data = {
-            'Metric': ['Accuracy', 'Precision', 'Recall', 'F1-Score', 'AUC Score', 'Matthews Correlation Coefficient (MCC)'],
+            'Metric': ['Accuracy', 'Precision', 'Recall', 'F1-Score', 'AUC Score', 'Matthews Correlation Coefficient (MCC)'] ,
             'Value': [accuracy, precision, recall, f1, auc_score, mcc]
         }
         metrics_df = pd.DataFrame(metrics_data)
@@ -271,7 +318,7 @@ else:
     st.warning("Please train a model to see evaluation metrics.")
 
 # --- Reset Button ---
-st.sidebar.markdown('---')
+st.sidebar.markdown("---")
 if st.sidebar.button('Clear Results and Reset'):
     for key in st.session_state.keys():
         del st.session_state[key]
